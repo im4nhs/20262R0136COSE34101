@@ -200,6 +200,11 @@ fork(void)
   }
   np->sz = curproc->sz;
   np->parent = curproc;
+  // R1: Assign child priority based on parent's priority
+  if(curproc->priority >= 15)
+    np->priority = curproc->priority / 2;
+  else
+    np->priority = curproc->priority + 1;
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
