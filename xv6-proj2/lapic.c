@@ -113,6 +113,24 @@ lapiceoi(void)
     lapicw(EOI, 0);
 }
 
+// Send a priority-rescheduling IPI to another CPU.
+void
+lapicresched(uchar apicid)
+{
+  if(!lapic)
+    return;
+
+  // Wait until the previous IPI has been delivered.
+  while(lapic[ICRLO] & DELIVS)
+    ;
+
+  lapicw(ICRHI, apicid << 24);
+  lapicw(ICRLO, FIXED | (T_IRQ0 + IRQ_RESCHED));
+
+  while(lapic[ICRLO] & DELIVS)
+    ;
+}
+
 // Spin for a given number of microseconds.
 // On real hardware would want to tune this dynamically.
 void

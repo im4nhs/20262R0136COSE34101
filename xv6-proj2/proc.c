@@ -89,6 +89,53 @@ remove_from_queue(struct proc *p)
   }
 }
 
+
+// R3: Check whether a runnable process outranks
+// the currently running process.
+// Caller must hold ptable.lock.
+static int
+should_preempt(struct proc *current)
+{
+  struct proc *next = ready_head;
+
+  if(!holding(&ptable.lock))
+    panic("should_preempt lock");
+
+  if(current == 0 || current->state != RUNNING)
+    return 0;
+
+  if(next == 0)
+    return 0;
+
+  if(next->priority < current->priority)
+    return 1;
+
+  if(next->priority == current->priority &&
+     next->pid > current->pid)
+    return 1;
+
+  return 0;
+}
+
+
+// R3: Check whether the current process should yield.
+// This function does not perform a context switch.
+int
+priority_preempt_needed(void)
+{
+  struct proc *current = myproc();
+  int result;
+
+  if(current == 0)
+    return 0;
+
+  acquire(&ptable.lock);
+  result = should_preempt(current);
+  release(&ptable.lock);
+
+  return result;
+}
+
 void
 pinit(void)
 {
@@ -254,6 +301,7 @@ int
 fork(void)
 {
   int i, pid;
+  int need_preempt;
   struct proc *np;
   struct proc *curproc = myproc();
 
@@ -295,7 +343,13 @@ fork(void)
   np->state = RUNNABLE;
   enqueue(np);
 
+  // R3: Check whether the new child outranks the parent.
+  need_preempt = should_preempt(curproc);
+
   release(&ptable.lock);
+
+  if(need_preempt)
+    yield();
 
   return pid;
 }
@@ -624,6 +678,8 @@ int
 setnice(int pid, int nice)
 {
   struct proc *p;
+  struct proc *curproc = myproc();
+  int need_preempt = 0;
 
   if(nice < 0 || nice > 30)
     return -1;
@@ -643,7 +699,14 @@ setnice(int pid, int nice)
         p->priority = nice;
       }
 
+      // R3: Check whether this CPU should run another process.
+      need_preempt = should_preempt(curproc);
+
       release(&ptable.lock);
+
+      if(need_preempt)
+        yield();
+
       return 0;
     }
   }

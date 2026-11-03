@@ -47,6 +47,9 @@ trap(struct trapframe *tf)
   }
 
   switch(tf->trapno){
+  case T_IRQ0 + IRQ_RESCHED:
+    lapiceoi();
+   break;
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);
@@ -100,10 +103,12 @@ trap(struct trapframe *tf)
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)
     exit();
 
-  // Force process to give up CPU on clock tick.
-  // If interrupts were on while locks held, would need to check nlock.
-  if(myproc() && myproc()->state == RUNNING &&
-     tf->trapno == T_IRQ0+IRQ_TIMER)
+  // R3: Reschedule only on a dedicated priority event.
+  // Check on return to user space, not inside kernel critical sections.
+  if(tf->trapno == T_IRQ0 + IRQ_RESCHED &&
+     (tf->cs & 3) == DPL_USER &&
+     myproc() && myproc()->state == RUNNING &&
+     priority_preempt_needed())
     yield();
 
   // Check if the process has been killed since we yielded
