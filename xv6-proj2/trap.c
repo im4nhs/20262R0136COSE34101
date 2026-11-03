@@ -43,6 +43,13 @@ trap(struct trapframe *tf)
     syscall();
     if(myproc()->killed)
       exit();
+
+    // R3: Give a higher-priority ready process the CPU
+    // before returning to user space.
+    if(myproc()->state == RUNNING &&
+       priority_preempt_needed())
+      yield();
+
     return;
   }
 
