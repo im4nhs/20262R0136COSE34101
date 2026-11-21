@@ -41,14 +41,14 @@ kinit1(void *vstart, void *vend)
   freerange(vstart, vend);
 }
 
+
 void
 kinit2(void *vstart, void *vend)
 {
   freerange(vstart, vend);
   kmem.use_lock = 1;
-  memset(&pmem.refcount, 0, sizeof(uint) * (PHYSTOP >> PGSHIFT));
-  pmem.num_free_pages = 0;
 }
+
 
 void
 freerange(void *vstart, void *vend)
@@ -63,32 +63,47 @@ freerange(void *vstart, void *vend)
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
+
 void
 kfree(char *v)
 {
   struct run *r;
+  uint pa;
 
   if((uint)v % PGSIZE || v < end || V2P(v) >= PHYSTOP)
     panic("kfree");
 
-  // Fill with junk to catch dangling refs.
-  memset(v, 1, PGSIZE);
+  pa = V2P(v);
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
+
+  if(pmem.refcount[pa >> PGSHIFT] > 0)
+    pmem.refcount[pa >> PGSHIFT]--;
+
+  if(pmem.refcount[pa >> PGSHIFT] > 0){
+    if(kmem.use_lock)
+      release(&kmem.lock);
+    return;
+  }
+
+  // Fill with junk to catch dangling refs.
+  memset(v, 1, PGSIZE);
+
   r = (struct run*)v;
   r->next = kmem.freelist;
   kmem.freelist = r;
-
   pmem.num_free_pages++;
 
   if(kmem.use_lock)
     release(&kmem.lock);
 }
 
+
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
+
 char*
 kalloc(void)
 {
@@ -96,14 +111,17 @@ kalloc(void)
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
 
-  pmem.num_free_pages--;
+  r = kmem.freelist;
+  if(r){
+    kmem.freelist = r->next;
+    pmem.num_free_pages--;
+    pmem.refcount[V2P(r) >> PGSHIFT] = 1;
+  }
 
   if(kmem.use_lock)
     release(&kmem.lock);
+
   return (char*)r;
 }
 
@@ -113,20 +131,55 @@ freemem(void)
   return pmem.num_free_pages;
 }
 
+
 uint
 get_refcount(uint pa)
 {
-  return 0;
+  uint count;
+
+  if(pa >= PHYSTOP || pa % PGSIZE)
+    panic("get_refcount");
+
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+
+  count = pmem.refcount[pa >> PGSHIFT];
+
+  if(kmem.use_lock)
+    release(&kmem.lock);
+
+  return count;
 }
 
 void
 inc_refcount(uint pa)
 {
-  return;
+  if(pa >= PHYSTOP || pa % PGSIZE)
+    panic("inc_refcount");
+
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+
+  pmem.refcount[pa >> PGSHIFT]++;
+
+  if(kmem.use_lock)
+    release(&kmem.lock);
 }
 
-void  
+void
 dec_refcount(uint pa)
 {
-  return;
+  if(pa >= PHYSTOP || pa % PGSIZE)
+    panic("dec_refcount");
+
+  if(kmem.use_lock)
+    acquire(&kmem.lock);
+
+  if(pmem.refcount[pa >> PGSHIFT] == 0)
+    panic("dec_refcount");
+
+  pmem.refcount[pa >> PGSHIFT]--;
+
+  if(kmem.use_lock)
+    release(&kmem.lock);
 }
