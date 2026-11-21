@@ -389,17 +389,59 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
   return 0;
 }
 
+
 void
 page_fault(void)
 {
   uint va = rcr2();
-  if(va < 0) {
-    panic("Invalid access");
+  uint pa;
+  pte_t *pte;
+  char *mem;
+  pde_t *pgdir;
+
+  if(myproc() == 0)
+    panic("page_fault: no process");
+
+  pgdir = myproc()->pgdir;
+
+  if(va >= KERNBASE || va >= myproc()->sz){
+    myproc()->killed = 1;
     return;
   }
-  
-  return;
+
+  pte = walkpgdir(pgdir, (void*)va, 0);
+
+  if(pte == 0 || !(*pte & PTE_P) || !(*pte & PTE_U)){
+    myproc()->killed = 1;
+    return;
+  }
+
+  pa = PTE_ADDR(*pte);
+
+  if(get_refcount(pa) > 1){
+    mem = kalloc();
+    if(mem == 0){
+      myproc()->killed = 1;
+      return;
+    }
+
+    memmove(mem, (char*)P2V(pa), PGSIZE);
+
+    *pte = V2P(mem) | PTE_FLAGS(*pte) | PTE_W;
+
+    dec_refcount(pa);
+  }
+  else if(get_refcount(pa) == 1){
+    *pte |= PTE_W;
+  }
+  else {
+    myproc()->killed = 1;
+    return;
+  }
+
+  lcr3(V2P(pgdir));
 }
+
 
 //PAGEBREAK!
 // Blank page.

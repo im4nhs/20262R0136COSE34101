@@ -47,9 +47,16 @@ trap(struct trapframe *tf)
   }
 
   switch(tf->trapno){
-  case T_PGFLT:
-    page_fault();
-    break;
+    case T_PGFLT:
+    if((tf->cs & 3) != DPL_USER ||
+       (tf->err & 0x7) != 0x7){
+      if(myproc() == 0 || (tf->cs & 3) != DPL_USER)
+        panic("page fault");
+      myproc()->killed = 1;
+      break;
+  }
+  page_fault();
+  break;
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
       acquire(&tickslock);
